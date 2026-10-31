@@ -1,5 +1,7 @@
 # Chronomaly — CVE-2025-38352 on LG webOS
 
+> Fork of [AnalyticETH/chronomaly-webos](https://github.com/AnalyticETH/chronomaly-webos) with extra tuning notes from testing on an LG 55UT80006LA (see [Tuning notes for 55UT80006LA](#tuning-notes-for-55ut80006la)). The exploit source is unchanged.
+
 Kernel exploit for [CVE-2025-38352](https://source.android.com/docs/security/bulletin/2025-09-01) (POSIX CPU timer race condition / use-after-free) achieving persistent root on LG webOS Smart TVs running kernel 5.4.268 on ARM64. Verified on 4 TV models across multiple firmware versions. Responsibly disclosed to LG's Security Researcher Program (February 2026).
 
 Built on [Chronomaly](https://github.com/farazsth98/chronomaly) by [farazsth98](https://github.com/farazsth98). Stage 1 UAF race logic and cross-cache infrastructure ported and adapted for ARM64; Stages 2–5 redesigned with novel exploitation techniques and solutions to real-hardware constraints that do not exist in emulated environments. Developed with the assistance of Claude Opus 4.6.
@@ -13,6 +15,7 @@ See [VULNERABILITY_REPORT.md](VULNERABILITY_REPORT.md) for the full vulnerabilit
 - Confirmed across firmware versions 33.22.65 – 33.30.97 (kernel 5.4.268-320 and -329)
 - Fully automated, completes within minutes, survives reboots via Homebrew Channel elevation
 - Reported to LG Security Researcher Program (February 7, 2026)
+- Fork addition: also verified on LG 55UT80006LA (webOS 25 / webOS TV 10.3.2-33, firmware 33.31.75, kernel 5.4.268-294.24, aarch64), using the unmodified source and timing arguments only
 
 ## Disclaimer
 
@@ -144,6 +147,7 @@ If DELAY is provided but DELTA is not, DELTA is auto-computed as `DELAY / 600` (
 | OLED55C4PUA | HE_DTV_W24G_AFABATAA | 30300 | 50 | 3000 |
 | OLED48C3AUB | - | 31300 | 50 | 3000 |
 | OLED65C3PUA | HE_DTV_W23O_AFABJAAA | 27900 | 50 | 3000 |
+| 55UT80006LA | - | 100000 | 165 | 3000 |
 
 ### Finding Values for a New TV
 
@@ -155,6 +159,17 @@ Parent raced too early  → INCREASE DELAY
 ```
 
 When both messages appear, the timing is close — keep running and the exploit should eventually hit the race window. Start with the compiled default (31000) and adjust from there.
+
+### Tuning notes for 55UT80006LA
+
+- **Tested on:** LG 55UT80006LA (UT80 series, Realtek SoC, 2024 model year), webOS 25 / webOS TV 10.3.2-33, firmware 33.31.75, kernel 5.4.268-294.24, aarch64. Root was obtained with the unmodified source built from this repo; only the command-line timing arguments were changed. Firmware 33.31.75 is therefore still exploitable.
+- **Parameters that worked:** `DELAY≈100000 DELTA=165 THRESHOLD=3000`, the same values as the 86QNED70AUA row. The compiled defaults (31000/50) are tuned for OLED models; this Realtek-based TV needed a much larger DELAY. It is likely, but not proven, that Realtek-based LG TVs share this window.
+- **The window drifts:** the effective DELAY moved between runs, roughly 80000–100000+. In eight unattended 240-second rounds with `DELTA=50` and DELAY between 85000 and 112000 no root was obtained; with DELAY≈100000 and DELTA scaled to it (165, which is what the auto-compute `DELAY/600` gives if you omit DELTA) it landed. This is a small sample, so treat it as a hint: pass DELTA explicitly or omit it, and do not leave it at 50 when DELAY is large. "Parent raced too late" was the message seen most often.
+- **Expect hard hangs:** the kernel race often freezes the whole TV; power-cycle it. A reboot wipes `/tmp`, so the exploit binary must be re-uploaded. After a crash the Dev Mode SSH port (9922) can stay down until the Dev Mode app is reopened and its session is re-enabled.
+- **Unattended retry loop:** a shell loop that waits for port 9922, re-uploads `/tmp/exploit-arm64` if it is missing, runs it under `timeout` (about 240 s per round) while cycling DELAY across the window, and stops when `/media/developer/apps/usr/palm/services/org.webosbrew.hbchannel.service/elevate-service` exists. Each round is a fresh attempt because a failed one usually crashes or reboots the TV.
+- **Success signature:** the Homebrew Channel app appears in the launcher and the Dev Mode app is removed automatically. Reboot, then root SSH is available on port 22.
+- **Tips after root:** on webOS 25 the root filesystem and `/etc` are read-only. Persistent changes go through Homebrew Channel `init.d` hooks in `/var/lib/webosbrew/init.d`, and `systemctl mask --runtime` works. Homebrew Channel also exposes passwordless root telnet on port 23: add an SSH key and turn telnet off. Do not install LG firmware updates after rooting; they may patch the exploit.
+- **Web-app exploits:** the app-level methods SlopBro and jsbro autoroot did not work on firmware 33.31.75 in this test (the privileged overlay apps ignore the injected URL), so the kernel exploit was needed.
 
 ## After Root
 
